@@ -1,0 +1,111 @@
+---
+title: "Dave's Paper"
+author: "Riley M. Anderson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(nls.multstart)
+library(cowplot)
+
+dave <- read.csv("C:/Users/riley/Desktop/CrowderLab/dave.csv")
+
+```
+
+```{r data_wrangling, echo = F}
+
+dave1 <- dave %>% 
+  slice(1:45) %>% 
+  pivot_longer(cols = Sc:Bb,
+               names_to = "predator",
+               values_to = "pred_density")
+
+dave1 %>% 
+  ggplot(aes(x = pred_density, y = Alive, color = predator)) +
+  geom_smooth(method = "glm", 
+              method.args = list(family = poisson()),
+              alpha = 0) +
+  geom_point(aes(color = predator),
+             alpha = 0.2) +
+  theme_cowplot() +
+  scale_x_continuous(trans = "log10")
+
+```
+
+
+
+```{r data_generation, echo = F}
+
+# Generate example data
+set.seed(123)
+evenness <- seq(0, 1, length.out = 100)
+richness <- sample(1:5, 100, replace = TRUE)
+prey <- 80 * exp(-10 * evenness) + 5 * richness + rnorm(100, mean = 0, sd = 5)
+
+# Create a data frame
+data <- data.frame(evenness = evenness, richness = richness, prey = prey)
+
+```
+
+# Model
+An exponentially declining model with variable asymptote:
+
+$$y(t)=ae^{-bt}+cx$$
+
+```{r define_model, echo = F}
+
+# Define the model function
+exp_decay_with_richness <- function(evenness, a, b, c, richness) {
+  a * exp(-b * evenness) + c * richness
+}
+
+```
+
+
+```{r models, echo = F}
+
+# Fit the model to the data
+fit <- nls_multstart(
+  prey ~ exp_decay_with_richness(evenness, a, b, c, richness),
+                     data = data,
+                     iter = 100,
+                     start = list(a = 80, b = 2, c = 5),
+                     start_lower = c(0, 0, 0),
+                     upper = c(100, Inf, 10))
+
+summary(fit)
+
+########## extract
+
+# Extract the coefficients
+a <- coef(fit)[1]
+b <- coef(fit)[2]
+c <- coef(fit)[3]
+
+# Create a data frame for plotting the fitted curve
+fitted_data <- data.frame(evenness = evenness, richness = richness,
+          fitted_values = exp_decay_with_richness(evenness, a, b, c, richness))
+
+data <- data %>% 
+  mutate(fitted_values = fitted_data$fitted_values)
+
+```
+
+```{r figure, echo = F}
+
+ggplot(data) +
+  geom_point(aes(x = evenness, y = prey, color = factor(richness)), shape = 1) +
+  geom_smooth(aes(x = evenness,
+                  y = fitted_values,
+                  fill = factor(richness)),
+              color = "red",
+              stat = "identity") +
+  labs(x = "Evenness", y = "Prey") +
+  theme_minimal()
+
+```
+

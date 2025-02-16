@@ -1,0 +1,278 @@
+---
+title: "Dave's Evenness Paper"
+author: "Diego Rincon & Riley Anderson"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+graphics: yes
+output:
+  github_document:
+    toc: yes
+    toc_depth: 5
+    pandoc_args: --webtex
+  html_document:
+    keep_md: yes
+    theme: readable
+    mathjax: default
+  html_notebook:
+    code_folding: hide
+    theme: readable
+    mathjax: default
+  pdf_document:
+    toc: yes
+header-includes:
+  \usepackage{float}
+  \floatplacement{figure}{H}
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include = F}
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# @@@@@ Knitr Options
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+# Set root directory to the project directory
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+
+
+# Set default knitr options: 
+# Suppress warnings and messages, cache chunks, 
+#  set default figure size to 6x8 at 300 dpi, and save a png and pdf
+knitr::opts_chunk$set(warning = F, message = F, collapse = T, cache = T,
+    fig.height = 6, fig.width = 8, dpi = 300, # 6x8" @ 300dpi:1800x2400=4.3MP
+    dev = c('png', 'pdf'), dev.args = list(pdf = list(onefile = F)))
+
+```
+
+
+
+## Overview
+
+What is this analysis about?
+
+### Summary of Results
+* 
+
+```{r Main_Code, include = F, cache = F}
+
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# @@@@@ Setup - This code is run, but output is hidden
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+# Load Packages
+library(tidyverse) # Needed for data wrangling: dplyr, tidyr, ggplot2
+library(cowplot) # Needed for publication-quality ggplots
+library(nls.multstart)
+require(bbmle)
+library(chemodiv)
+
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# @@@@@ Data Preparation
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+# Import datasets
+dave <- read.csv("data/dave.csv")
+block1 <- read.csv("data/block1.csv")
+block2 <- read.csv("data/block2.csv")
+block3 <- read.csv("data/block3.csv")
+
+```
+
+```{r data_wrangling, echo = F}
+
+#Dataset with only perfect evenness treatments
+alleven <- rbind(block1[136:165, ], block2[136:165, ], block3[91:110, ])
+
+alldata <- rbind(block1, block2, block3)
+
+alldata$Even <- calcDiv(alldata[,2:4], type = "HillEven", q = 1)
+
+colnames(alldata)[7] <- "Even"
+
+```
+
+# Diego's model with binomial pdf
+
+This model follows Northfield's equation:
+
+$$Y = m_{b} (p_{0} + p_{1}e^{-a_{1}x_{1}} + p_{2}e^{-a_{2}x_{2}}+p_{3}e^{-a_{3}x_{3}})$$
+
+```{r Diego_code, echo = F, comment = ""}
+
+
+
+# Likelihood function
+
+LL1 <- function(mb, p0, p1, p2, p3, a1, a2, a3) {
+  Y = mb * (p0 + (p1 * exp(-a1 * x1)) + (p2 * exp(-a2 * x2)) + (p3 * exp(-a3 * x3))) # this is Tobin's function
+  -sum(dbinom(resp, size = initial, prob = Y, log = TRUE)) # Decided to use a binomial
+}
+
+# Optimization
+
+# Makes more sense because of the boundaries in estimation, but does not work
+
+# MLL1 <- mle2(LL1, start = list(mb = 0.5, p0 = 0.1, p1 = 0.3, p2 = 0.3, p3 = 0.3, a1 = 0.001, a2 = 0.001, a3 = 0.001), 
+#              data = list(x1 = alleven$Sc, x2 = alleven$Hm, x3 = alleven$Bb, resp = alleven$Alive, initial = rep(10, 80)),
+#              lower = list(p0 = 0, p1 = 0, p2 = 0, p3 = 0), 
+#              upper = list(p0 = 1, p1 = 1, p2 = 1, p3 = 1), method = "L-BFGS-B")
+
+# No boundaries but works (kind of..)
+MLL1a <- mle2(LL1, start = list(mb = 0.5, p0 = 0.1, p1 = 0.3, p2 = 0.3, p3 = 0.3, a1 = 0.001, a2 = 0.001, a3 = 0.001), 
+              data = list(x1 = alleven$Sc, x2 = alleven$Hm, x3 = alleven$Bb, resp = alleven$Alive, initial = rep(10, 80)),
+              method = "Nelder-Mead")
+
+summary(MLL1a)
+
+```
+
+
+# Diego's model with poisson pdf
+
+This works with the boundaries in estimation
+```{r poisson_MLE, echo = F}
+
+
+
+# Likelihood function
+
+LL2 <- function(mb, p0, p1, p2, p3, a1, a2, a3) {
+  Y = mb * (p0 + (p1 * exp(-a1 * x1)) + (p2 * exp(-a2 * x2)) + (p3 * exp(-a3 * x3)))
+  -sum(dpois(resp, lambda = Y, log = TRUE)) # trying a poisson dist.
+}
+
+# Optimization
+
+MLLp1 <- mle2(LL2, start = list(mb = .5, p0 = 0, p1 = 1, p2 = 1, p3 = 1, a1 = 0.001, a2 = 0.001, a3 = 0.001), 
+             data = list(x1 = alleven$Sc, x2 = alleven$Hm, x3 = alleven$Bb, resp = alleven$Alive, initial = rep(10, 80)),
+             lower = list(p0 = 0, p1 = 0, p2 = 0, p3 = 0), 
+             upper = list(p0 = 10, p1 = 10, p2 = 10, p3 = 10), method = "L-BFGS-B")
+
+summary(MLLp1)
+
+
+est_params <- data.frame(as.list(coef(MLLp1)))
+
+
+# Create a data frame for prediction
+prediction_df <- data.frame(
+  x1 = alleven$Sc,
+  x2 = alleven$Hm,
+  x3 = alleven$Bb
+)
+
+# Add columns for fitted values using the estimated parameters
+prediction_df$fitted_values <- with(est_params, 
+  mb * (p0 + (p1 * exp(-a1 * prediction_df$x1)) + (p2 * exp(-a2 * prediction_df$x2)) + (p3 * exp(-a3 * prediction_df$x3)))
+)
+
+# Make a figure
+ggplot(prediction_df, aes(x = x1, y = fitted_values)) +
+  geom_point() +
+  labs(x = "Predator abundance",
+       y = "Prey alive") +
+  theme_cowplot() +
+  geom_smooth(method = "lm",
+              formula = y ~ exp(-x * est_params$a1))
+
+
+```
+
+
+
+
+# Riley's model
+
+This is not likely to be useful, it was more of a learning exercise to understand the nls model features. The main problem is that this model assumes the exponential regression coefficient is constant across each species. 
+
+```{r data_generation, echo = F}
+
+# Generate example data
+set.seed(123)
+pred.abun <- seq(100, 10000, length.out = 100)
+evenness <- sample(1:4, 100, replace = TRUE)
+alive <- 10 * exp(-10 * pred.abun) + 5 * evenness + 
+  rnorm(100, mean = 0, sd = 5)
+
+# Create a data frame
+data <- data.frame(pred.abun = pred.abun, evenness = evenness, alive = alive)
+
+```
+
+# Model
+A negative exponential model with variable asymptote:
+
+$$y(t)=ae^{-bt}+cx$$
+
+```{r define_model, echo = F}
+
+# Define the model function
+exp_decay <- function(pred.abun, a, b, c, evenness) {
+  a * exp(-b * pred.abun) + c * evenness
+}
+
+```
+
+
+```{r models, echo = F, eval=FALSE}
+
+# Fit the model to the data
+fit <- nls_multstart(
+  alive ~ exp_decay(pred.abun, a, b, c, evenness),
+                     data = data,
+                     iter = 100,
+                     start = list(a = 10, b = 2, c = 5),
+                     start_lower = c(0, 0, 0),
+                     upper = c(100, Inf, 10))
+
+summary(fit)
+
+
+# Extract the coefficients
+a <- coef(fit)[1]
+b <- coef(fit)[2]
+c <- coef(fit)[3]
+
+# Create a data frame for plotting the fitted curve
+fitted_data <- data.frame(pred.abun = pred.abun, evenness = evenness,
+          fitted_values = exp_decay(pred.abun, a, b, c, evenness))
+
+data <- data %>% 
+  mutate(fitted_values = fitted_data$fitted_values,
+         evenness = factor(evenness))
+
+```
+
+```{r figure_Riley_mod, echo = F, eval = F}
+
+ggplot(data) +
+  geom_point(aes(x = pred.abun,
+                 y = alive,
+                 fill = evenness), shape = 1) +
+  geom_smooth(aes(x = pred.abun,
+                  y = fitted_values,
+                  fill = evenness),
+              stat = "identity") +
+  labs(x = "Predator abundance", y = "Prey alive", fill = "Evenness") +
+  theme_cowplot()
+
+```
+
+
+```{r Graph_name, echo = F}
+
+# Put each graph in a separate code block with a different name
+
+```
+
+
+## Session Information
+
+```{r Session_Info, echo = F, comment = ""}
+
+# Add session information to help with reproduceability
+sessionInfo()
+
+
+```
+
+
